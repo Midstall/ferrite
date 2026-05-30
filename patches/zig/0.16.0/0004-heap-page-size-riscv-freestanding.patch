@@ -1,0 +1,26 @@
+From: Ferrite overlay
+Subject: [PATCH] std.heap: default page_size_min for riscv freestanding
+
+Zig's `page_size_min_default` table omits riscv32/riscv64 from the
+`.freestanding`/`.other` branch, so `std.heap.page_size_min` hits a
+`@compileError` for `riscv64-freestanding`. This breaks any std code
+that references it, e.g. `std.Io.File.MemoryMap` (pulled in via
+`std.http` in wget), even though it compiles fine on aarch64 and
+x86_64 freestanding which the table already covers.
+
+riscv uses 4 KiB base pages on every real OS entry in this same table
+(Linux/FreeBSD/NetBSD/...), so default freestanding riscv to 4 KiB to
+match aarch64/x86_64. page_size_max is unaffected: MemoryMap only
+references page_size_min, which is why aarch64 (also without a
+freestanding page_size_max default) already builds.
+
+--- a/std/heap.zig
++++ b/std/heap.zig
+@@ -840,6 +840,7 @@
+         .wasm32, .wasm64 => 64 << 10,
+         .x86, .x86_64 => 4 << 10,
+         .aarch64, .aarch64_be => 4 << 10,
++        .riscv32, .riscv64 => 4 << 10,
+         else => null,
+     },
+     else => null,

@@ -1,3 +1,13 @@
 .zig-cache/
 zig-out/
+zig-pkg/
 *.o
+*.elf
+*.macho
+*.bin
+!uspace/badapple/src/video.bin
+!uspace/badapple/src/score.bin
+
+result
+result-*
+.direnv

@@ -1,0 +1,21 @@
+.{
+    .name = .ferrite,
+    .version = "0.0.0",
+    .dependencies = .{
+        .tzdata = .{
+            .url = "https://github.com/eggert/tz/archive/refs/tags/2025b.tar.gz",
+            .hash = "N-V-__8AAFZfHADVclCnLuFEqFa5gy6J_5qG7PFrucpHjaOg",
+        },
+        .nss = .{
+            .url = "https://github.com/nss-dev/nss/archive/refs/tags/NSS_3_111_RTM.tar.gz",
+            .hash = "N-V-__8AAOrhRAuNq4DX5826dHW9i_Wn1habuXPsF2dPQtE9",
+        },
+    },
+    .fingerprint = 0x5e9a3a7a6ecd005f,
+    .minimum_zig_version = "0.16.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

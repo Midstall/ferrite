@@ -1,0 +1,2 @@
+command = bin/mount.tmpfs
+args    = com.midstall.ferrite.tmpfs@v0

@@ -1,0 +1,2 @@
+command  = bin/svc.net
+provides = com.midstall.ferrite.net@v0

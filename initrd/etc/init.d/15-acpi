@@ -1,0 +1,2 @@
+# Exposes the raw ACPI tables as /dev/acpi. Exits on devicetree-only platforms.
+command = bin/drv.acpi

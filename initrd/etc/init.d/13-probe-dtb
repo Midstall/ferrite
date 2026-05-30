@@ -1,0 +1,4 @@
+command  = bin/drv.probe.dtb
+wait     = ready
+provides = com.midstall.ferrite.probe@v0
+unless   = com.midstall.ferrite.probe@v0

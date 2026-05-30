@@ -1,0 +1,27 @@
+From: Ferrite overlay
+Subject: [PATCH] std.posix: select std.os.ferrite for `system` on Ferrite
+
+Wire `std.posix.system` to our `std.os.ferrite` namespace when the
+overlay is active. That makes `std.posix.fd_t` resolve to our
+ferrite-defined `fd_t` (u32, used as a slab-index handle by the Io
+backend), which in turn makes `std.Io.Dir.Handle` and
+`std.Io.File.Handle` come out as u32 without separate patches in
+Io/Dir.zig and Io/File.zig.
+
+Gate is `@hasDecl(std.os, "ferrite")` because nix-released Zig 0.16.0
+still reports `native_os = .freestanding` for our builds; the compiler
+binary doesn't recognize the `.ferrite` target string yet even though
+Os.Tag lists it.
+
+--- a/std/posix.zig
++++ b/std/posix.zig
+@@ -34,7 +34,9 @@ const wasi = std.os.wasi;
+
+ /// A libc-compatible API layer.
+ pub const system = if (use_libc)
+     std.c
++else if (@hasDecl(std.os, "ferrite"))
++    std.os.ferrite.system
+ else switch (native_os) {
+     .linux => linux,
+     .plan9 => std.os.plan9,

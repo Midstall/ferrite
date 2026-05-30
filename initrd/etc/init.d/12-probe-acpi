@@ -1,0 +1,6 @@
+# Device probe via ACPI. The probe that finds devices stays running and
+# provides the probe service; the other exits early. We try ACPI first, then
+# fall back to devicetree (41-probe-dtb skips if ACPI already provided it).
+command  = bin/drv.probe.acpi
+wait     = ready
+provides = com.midstall.ferrite.probe@v0

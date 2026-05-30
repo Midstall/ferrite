@@ -1,0 +1,4 @@
+# Exposes the boot cpio as /dev/initrd. This is a devfs device node, not a
+# nameserver authority, so it can't be a wait=ready barrier; the rootfs mount
+# retries opening /dev/initrd until this driver has registered the device.
+command = bin/drv.initrd

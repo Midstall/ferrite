@@ -1,0 +1,20 @@
+# IPC service registry: friendly name -> authority URI.
+#
+# This maps a short service name to the IPC authority a server registers with
+# the nameserver. Boot order lives in /etc/init.d/, not here.
+#
+# Format: name  authority
+
+devfs    com.midstall.ferrite.devfs@v0
+tmpfs    com.midstall.ferrite.tmpfs@v0
+runfs    com.midstall.ferrite.runfs@v0
+dhcpfs   com.midstall.ferrite.dhcpfs@v0
+tty      com.midstall.ferrite.tty@v0
+initrd   com.midstall.ferrite.drv.initrd@v0
+rootfs   com.midstall.ferrite.fs@v0
+probe    com.midstall.ferrite.probe@v0
+users    com.midstall.ferrite.users@v0
+time     com.midstall.ferrite.time@v0
+procfs   com.midstall.ferrite.procfs@v0
+net      com.midstall.ferrite.net@v0
+dns      com.midstall.ferrite.dns@v0

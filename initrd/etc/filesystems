@@ -1,0 +1,6 @@
+# Format: type binary
+
+cpio    bin/mount.cpio
+ext4    bin/mount.ext4
+fat     bin/mount.fat
+tmpfs   bin/mount.tmpfs

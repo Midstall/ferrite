@@ -1,0 +1,4 @@
+# /dev. Drivers register their device nodes here, so block until it is up.
+command  = bin/mount.devfs
+wait     = ready
+provides = com.midstall.ferrite.devfs@v0

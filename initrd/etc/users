@@ -1,0 +1,5 @@
+# Format: name:uid:sha256$salt$hex
+# Generate: echo -n "<salt>:<password>" | sha256sum
+
+root:0:sha256$rsalt$6da14c87041a3051e111f1b85ad4b1315fbd6de2be850b5c9f3b4675ef87e57f
+ross:1000:sha256$ross1k$17affd07ab8aa795286a2ac27ed9373ef10b1d420838205527795e004d8f2375

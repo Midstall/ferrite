@@ -1,0 +1,2 @@
+# Exposes the raw devicetree as /dev/dtb. Exits on ACPI-only platforms.
+command = bin/drv.dtb

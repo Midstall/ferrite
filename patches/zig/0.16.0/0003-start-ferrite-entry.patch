@@ -1,0 +1,30 @@
+From: Ferrite overlay
+Subject: [PATCH] std/start.zig: export Ferrite's _start when std.os.ferrite present
+
+When our overlay layers `std.os.ferrite` into the std tree, divert the
+comptime entry-point dispatch to export Ferrite's `_start` (naked, per
+arch) and `ferriteStartShim` (the trampoline that populates
+`std.os.ferrite.argv` and calls `root.main`). Both live in our overlay
+at `std/os/ferrite/start.zig`.
+
+Gate is `@hasDecl(std.os, "ferrite")` rather than `native_os ==
+.ferrite` because stock nix-released Zig 0.16.0's compiler doesn't
+know about a `.ferrite` target string; today the compiler reports
+`builtin.os.tag = .freestanding` for our builds. The hasDecl check
+catches our overlay regardless of which tag the compiler picked.
+
+--- a/std/start.zig
++++ b/std/start.zig
+@@ -62,6 +62,12 @@
+             // Only call main when defined. For WebAssembly it's allowed to pass `-fno-entry` in which
+             // case it's not required to provide an entrypoint such as main.
+             if (!@hasDecl(root, start_sym_name) and @hasDecl(root, "main")) @export(&wasm_freestanding_start, .{ .name = start_sym_name });
++        } else if (@hasDecl(std.os, "ferrite")) {
++            // Ferrite freestanding boot — overlay-provided naked _start
++            // parses argc/argv off the stack and calls ferriteStartShim.
++            if (!@hasDecl(root, start_sym_name) and @hasDecl(root, "main")) {
++                @export(&std.os.ferrite.start._start, .{ .name = start_sym_name, .linkage = .strong });
++            }
+         } else switch (native_os) {
+             .other, .freestanding, .@"3ds", .psp, .vita => {},
+             else => if (!@hasDecl(root, start_sym_name)) @export(&_start, .{ .name = start_sym_name }),

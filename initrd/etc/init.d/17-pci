@@ -1,0 +1,3 @@
+# Assigns PCI BARs (needed on raw/Limine boots). Needs the device probe.
+command = bin/drv.pci
+needs   = com.midstall.ferrite.probe@v0

@@ -1,0 +1,21 @@
+From: Ferrite overlay
+Subject: [PATCH] std.Target.Os.Tag: add `ferrite`
+
+Add `.ferrite` to the OS tag enum so stdlib code (and any future Zig
+fork built with Ferrite as a real target) can reference it in switches
+the normal way. Stock nix-released Zig 0.16.0 still parses target
+strings via the compiler binary, which doesn't know `.ferrite`, so
+this enum entry stays dead code there — but adding it now keeps the
+other patches honest about the discriminator and lets the fork at
+midstall/zig build cleanly.
+
+--- a/std/Target.zig
++++ b/std/Target.zig
+@@ -30,6 +30,7 @@
+         plan9,
+         rtems,
+         serenity,
++        ferrite,
+
+         dragonfly,
+         freebsd,

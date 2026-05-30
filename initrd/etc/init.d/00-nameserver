@@ -1,0 +1,3 @@
+# The nameserver process services the registry + mount table over the channel
+# init pre-bound in the kernel namespace. Everything else depends on it.
+command = bin/nameserver

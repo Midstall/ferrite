@@ -1,0 +1,9 @@
+# Mount the root filesystem at /. The @rootfs sentinel makes init pick the
+# device + driver from the kernel cmdline (root= / rootfstype=) via
+# /etc/filesystems: root=initrd uses the boot cpio (/dev/initrd); a block
+# device (e.g. root=/dev/blk0 rootfstype=ext4) uses that disk. The block driver
+# (drv.virtio-blk) is brought up earlier so the device exists by now.
+command  = @rootfs
+wait     = ready
+provides = com.midstall.ferrite.fs@v0
+needs    = com.midstall.ferrite.devfs@v0

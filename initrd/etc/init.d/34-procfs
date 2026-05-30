@@ -1,0 +1,2 @@
+command  = bin/mount.procfs
+provides = com.midstall.ferrite.procfs@v0

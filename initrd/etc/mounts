@@ -1,0 +1,11 @@
+# Format: prefix authority
+
+/dev       com.midstall.ferrite.devfs@v0
+/tmp       com.midstall.ferrite.tmpfs@v0
+/run       com.midstall.ferrite.runfs@v0
+/run/dhcp  com.midstall.ferrite.dhcpfs@v0
+/sys/net   com.midstall.ferrite.net@v0
+/sys/dns   com.midstall.ferrite.dns@v0
+/sys/time  com.midstall.ferrite.time@v0
+/proc      com.midstall.ferrite.procfs@v0
+/          com.midstall.ferrite.fs@v0
