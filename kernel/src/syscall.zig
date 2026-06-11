@@ -18,6 +18,7 @@ const sched = @import("sched.zig");
 const signature = @import("signature.zig");
 const thread = @import("thread.zig");
 const timer_mod = @import("timer.zig");
+const vmm = @import("vmm.zig");
 
 pub const Errno = enum(isize) {
     ok = 0,
@@ -36,7 +37,7 @@ inline fn err(e: Errno) isize {
     return @intFromEnum(e);
 }
 
-// --- info / I/O on the kernel itself (0..8) ---
+// info / I/O on the kernel itself (0..8)
 pub const SYS_DEBUG_PRINT: usize = 0;
 pub const SYS_WRITE_CONSOLE: usize = 1;
 pub const SYS_READ_CONSOLE: usize = 2;
@@ -47,7 +48,7 @@ pub const SYS_YIELD: usize = 6;
 pub const SYS_UNAME: usize = 7;
 pub const SYS_MEM_INFO: usize = 8;
 
-// --- process / thread management (9..14) ---
+// process / thread management (9..14)
 pub const SYS_SPAWN: usize = 9;
 pub const SYS_EXEC: usize = 10;
 pub const SYS_WAIT: usize = 11;
@@ -55,7 +56,7 @@ pub const SYS_TRY_WAIT: usize = 12;
 pub const SYS_KILL: usize = 13;
 pub const SYS_THREAD_SPAWN: usize = 14;
 
-// --- IPC, caps, and namespace (15..21) ---
+// IPC, caps, and namespace (15..21)
 pub const SYS_SEND: usize = 15;
 pub const SYS_RECV: usize = 16;
 pub const SYS_CHANNEL_CREATE: usize = 17;
@@ -64,7 +65,7 @@ pub const SYS_CAP_RELEASE: usize = 19;
 pub const SYS_NS_BIND: usize = 20;
 pub const SYS_NS_LOOKUP: usize = 21;
 
-// --- memory + IRQ (22..28) ---
+// memory + IRQ (22..28)
 pub const SYS_ALLOC_PAGES: usize = 22;
 pub const SYS_DMA_ALLOC: usize = 23;
 pub const SYS_MMIO_CREATE: usize = 24;
@@ -73,54 +74,54 @@ pub const SYS_IRQ_CREATE: usize = 26;
 pub const SYS_IRQ_LISTEN: usize = 27;
 pub const SYS_IRQ_ACK: usize = 28;
 
-// --- firmware blob reads (29..31) ---
+// firmware blob reads (29..31)
 // All three share the `(buf=NULL, len=u64.max)` size-query sentinel.
 pub const SYS_INITRD_READ: usize = 29;
 pub const SYS_DTB_READ: usize = 30;
 pub const SYS_ACPI_READ: usize = 31;
 
-// --- TTY foreground-process slot (32..34) ---
+// TTY foreground-process slot (32..34)
 pub const SYS_TTY_RAW: usize = 32;
 pub const SYS_TTY_FG_SET: usize = 33;
 pub const SYS_TTY_KILL_FG: usize = 34;
 
-// --- Clocks (35) ---
+// Clocks (35)
 pub const SYS_CLOCK_MONO: usize = 35;
 
-// --- Process introspection (36..37) ---
+// Process introspection (36..37)
 pub const SYS_PROC_LIST: usize = 36;
 pub const SYS_KILL_PID: usize = 37;
 
-// --- User identity (38..39) ---
+// User identity (38..39)
 pub const SYS_GETUID: usize = 38;
 pub const SYS_SETUID: usize = 39;
 
-// --- Scheduling (40..41) ---
+// Scheduling (40..41)
 pub const SYS_THREAD_PRIORITY: usize = 40;
 pub const SYS_THREAD_DEADLINE: usize = 41;
 
-// --- Process accounting (42..43) ---
+// Process accounting (42..43)
 pub const SYS_PROC_STAT: usize = 42;
 pub const SYS_HANDLE_PID: usize = 43;
 
-// --- Clocks + timers (44..45) ---
+// Clocks + timers (44..45)
 pub const SYS_CLOCK_BOOT: usize = 44;
 pub const SYS_NANOSLEEP: usize = 45;
 
-// --- PCI config IO ports (x86 only; arch.pci returns null elsewhere) (46..47) ---
+// PCI config IO ports (x86 only; arch.pci returns null elsewhere) (46..47)
 pub const SYS_PCI_CFG_READ: usize = 46;
 pub const SYS_PCI_CFG_WRITE: usize = 47;
 
 pub const SYS_SPAWN_NS: usize = 48;
 
-// --- Memory return path (49) ---
+// Memory return path (49)
 //
 // SYS_FREE_PAGES returns a previously-allocated region (SYS_ALLOC_PAGES /
 // SYS_DMA_ALLOC / SYS_MMAP) back to the kernel. The va must match the
 // base of an existing region; partial unmaps aren't supported.
 pub const SYS_FREE_PAGES: usize = 49;
 
-// --- POSIX process model: groups + signals (50..52) ---
+// POSIX process model: groups + signals (50..52)
 // SETPGID(pid, pgid): set process pid's group (pid=0 -> self, pgid=0 -> pid).
 // GETPGID(pid): return pid's pgid (pid=0 -> self).
 // SIGNAL(pid, sig): deliver sig to process pid (default action = terminate).
@@ -132,6 +133,31 @@ pub const SYS_SIGNAL: usize = 52;
 // (restores the sigframe); the generic dispatch entry is a safety no-op.
 pub const SYS_SIGACTION: usize = 53;
 pub const SYS_SIGRETURN: usize = 54;
+
+// Userspace microVM (KVM-style; riscv64 H today; see vmm.zig).
+// VM_CREATE(entry_gpa): create a VM, set the vCPU entry, return a .vm handle.
+// VM_MAP(vm, gpa, npages, *out_va): back npages of guest RAM at gpa, map it in
+//   the G-stage AND into this process so the VMM can load the guest; *out_va.
+// VCPU_RUN(vm, *out_a7, *out_a0): enter the guest; on return *out_a7/*out_a0
+//   carry the guest a7/a0 and the syscall returns an ExitKind (0=sbi/1=fault/
+//   2=interrupt). The kernel advances past the trapping ecall on an SBI exit.
+pub const SYS_VM_CREATE: usize = 55;
+pub const SYS_VM_MAP: usize = 56;
+pub const SYS_VCPU_RUN: usize = 57;
+// VCPU_SET_REG(vm, idx, val) / VCPU_GET_REG(vm, idx, *out): read/write a guest
+// GPR (x0..x31). Used to seed boot registers (a0=hartid, a1=initrd/DTB) and to
+// return SBI results to the guest between runs.
+pub const SYS_VCPU_SET_REG: usize = 58;
+pub const SYS_VCPU_GET_REG: usize = 59;
+// VCPU_MMIO(vm, *info): fetch the most recent exit's MMIO detail (valid after a
+// VCPU_RUN that returned reason mmio=3). Used by aarch64 guests, whose console
+// is a trapped device access rather than an SBI call.
+pub const SYS_VCPU_MMIO: usize = 60;
+// VCPU_EL0_ENTRY(vm, entry, sp): configure the vCPU to enter the guest
+// unprivileged so a sandboxed userspace program's syscalls trap straight to the
+// hypervisor (aarch64 EL0 + HCR_EL2.TGE, riscv64 VU-mode). The program then
+// needs no in-guest shim or page tables.
+pub const SYS_VCPU_EL0_ENTRY: usize = 61;
 
 pub const SPAWN_NS_CLEAR: usize = 1 << 0;
 
@@ -207,6 +233,13 @@ pub fn dispatch(num: usize, a0: usize, a1: usize, a2: usize, a3: usize, a4: usiz
         SYS_SIGNAL => sysSignal(@truncate(a0), @truncate(a1)),
         SYS_SIGACTION => sysSigaction(@truncate(a0), a1, a2),
         SYS_SIGRETURN => err(.ok), // normally intercepted in the EL0 trap path
+        SYS_VM_CREATE => sysVmCreate(a0),
+        SYS_VM_MAP => sysVmMap(@truncate(a0), a1, a2, a3),
+        SYS_VCPU_RUN => sysVcpuRun(@truncate(a0), a1, a2),
+        SYS_VCPU_SET_REG => sysVcpuSetReg(@truncate(a0), a1, a2),
+        SYS_VCPU_GET_REG => sysVcpuGetReg(@truncate(a0), a1, a2),
+        SYS_VCPU_MMIO => sysVcpuMmio(@truncate(a0), a1),
+        SYS_VCPU_EL0_ENTRY => sysVcpuEl0Entry(@truncate(a0), a1, a2),
         else => err(.bad_num),
     };
 
@@ -229,7 +262,7 @@ pub fn dispatch(num: usize, a0: usize, a1: usize, a2: usize, a3: usize, a4: usiz
     return ret;
 }
 
-// --- helpers for u64 user-out writes (split into two usizes on i386) ---
+// helpers for u64 user-out writes (split into two usizes on i386)
 
 /// Resolves `va` against the current process's page table to a kernel-side
 /// pointer. M-mode riscv64 runs paging-off, so the kernel can't dereference
@@ -329,7 +362,7 @@ inline fn readUserU64(in_lo_va: usize, in_hi_va: usize) u64 {
     return @as(u64, in_lo_va) | (@as(u64, in_hi_va) << 32);
 }
 
-// --- handlers ---
+// handlers
 
 fn sysDebugPrint(byte: usize) isize {
     const b: u8 = @truncate(byte);
@@ -1023,6 +1056,112 @@ fn sysFreePages(va: usize) isize {
         else => err(.bad_arg),
     };
     return err(.ok);
+}
+
+// userspace microVM (KVM-style)
+// The `if (comptime vmm.available)` form skips analysis of the body on arches
+// without a hypervisor backend (vmm.VmObject is `void` there), so the calls
+// just fail with .denied instead of failing to compile.
+
+fn sysVmCreate(entry: usize) isize {
+    if (comptime vmm.available) {
+        const proc = currentProcess() orelse return err(.no_process);
+        if (!proc.authority.mmio_map) return err(.denied);
+        // aarch64 only has the world-switch when booted at EL2 (-Dhyp).
+        if (@hasDecl(arch, "hypActive") and !arch.hypActive()) return err(.denied);
+        const vm = vmm.VmObject.create(heap.allocator()) catch return err(.no_mem);
+        vm.setEntry(@intCast(entry));
+        const handle = proc.cap_table.mint(.vm, .{ .read = true, .write = true }, @ptrCast(vm)) catch {
+            heap.allocator().destroy(vm);
+            return err(.no_mem);
+        };
+        return @intCast(handle);
+    } else return err(.denied);
+}
+
+fn sysVmMap(handle: cap.Handle, gpa: usize, npages: usize, out_va_ptr: usize) isize {
+    if (comptime vmm.available) {
+        const proc = currentProcess() orelse return err(.no_process);
+        const ent = proc.cap_table.get(handle, .vm) catch return err(.bad_handle);
+        const vm: *vmm.VmObject = @ptrCast(@alignCast(ent.object orelse return err(.bad_handle)));
+        if (npages == 0 or npages > 4096) return err(.bad_arg);
+        const phys = vm.mapRam(@intCast(gpa), npages) orelse return err(.no_mem);
+        // Also map the same RAM into the VMM's address space so it can load the
+        // guest image into it.
+        const region = heap.allocator().create(aspace.MemRegion) catch return err(.no_mem);
+        region.* = .{ .phys = phys, .len = npages * @as(usize, @intCast(memory.pageSize())), .device = false };
+        const p: aspace.Prot = .{ .read = true, .write = true, .execute = false, .user = true };
+        const va = proc.aspace.mmap(region, p) catch {
+            heap.allocator().destroy(region);
+            return err(.no_mem);
+        };
+        return writeUserUsize(out_va_ptr, va);
+    } else return err(.denied);
+}
+
+fn sysVcpuRun(handle: cap.Handle, out_a7_ptr: usize, out_a0_ptr: usize) isize {
+    if (comptime vmm.available) {
+        const proc = currentProcess() orelse return err(.no_process);
+        const ent = proc.cap_table.get(handle, .vm) catch return err(.bad_handle);
+        const vm: *vmm.VmObject = @ptrCast(@alignCast(ent.object orelse return err(.bad_handle)));
+        const exit = vm.run();
+        // The backend's run() already retired the trapping instruction (ecall /
+        // MMIO load-store) so the next VCPU_RUN resumes after it. Forward two
+        // scratch values: on a hypercall they are the call selector + first arg
+        // (riscv a7/a0; aarch64 x0/x1); on a fault, the cause + fault address.
+        if (exit.reason == .hypercall) {
+            const sel_idx: usize = if (builtin.cpu.arch == .riscv64) 17 else 0; // a7 / x0
+            const arg_idx: usize = if (builtin.cpu.arch == .riscv64) 10 else 1; // a0 / x1
+            _ = writeUserUsize(out_a7_ptr, vm.reg(sel_idx));
+            _ = writeUserUsize(out_a0_ptr, vm.reg(arg_idx));
+        } else {
+            _ = writeUserUsize(out_a7_ptr, exit.mcause);
+            _ = writeUserUsize(out_a0_ptr, exit.mtval);
+        }
+        return @intCast(@intFromEnum(exit.reason));
+    } else return err(.denied);
+}
+
+fn sysVcpuSetReg(handle: cap.Handle, idx: usize, val: usize) isize {
+    if (comptime vmm.available) {
+        const proc = currentProcess() orelse return err(.no_process);
+        const ent = proc.cap_table.get(handle, .vm) catch return err(.bad_handle);
+        const vm: *vmm.VmObject = @ptrCast(@alignCast(ent.object orelse return err(.bad_handle)));
+        if (idx >= 32) return err(.bad_arg);
+        vm.setReg(idx, @intCast(val));
+        return err(.ok);
+    } else return err(.denied);
+}
+
+fn sysVcpuGetReg(handle: cap.Handle, idx: usize, out_ptr: usize) isize {
+    if (comptime vmm.available) {
+        const proc = currentProcess() orelse return err(.no_process);
+        const ent = proc.cap_table.get(handle, .vm) catch return err(.bad_handle);
+        const vm: *vmm.VmObject = @ptrCast(@alignCast(ent.object orelse return err(.bad_handle)));
+        if (idx >= 32) return err(.bad_arg);
+        return writeUserUsize(out_ptr, vm.reg(idx));
+    } else return err(.denied);
+}
+
+fn sysVcpuEl0Entry(handle: cap.Handle, entry: usize, sp: usize) isize {
+    if (comptime vmm.available) {
+        const proc = currentProcess() orelse return err(.no_process);
+        const ent = proc.cap_table.get(handle, .vm) catch return err(.bad_handle);
+        const vm: *vmm.VmObject = @ptrCast(@alignCast(ent.object orelse return err(.bad_handle)));
+        vm.setEl0Entry(@intCast(entry), @intCast(sp));
+        return err(.ok);
+    } else return err(.denied);
+}
+
+fn sysVcpuMmio(handle: cap.Handle, out_ptr: usize) isize {
+    if (comptime vmm.available) {
+        const proc = currentProcess() orelse return err(.no_process);
+        const ent = proc.cap_table.get(handle, .vm) catch return err(.bad_handle);
+        const vm: *vmm.VmObject = @ptrCast(@alignCast(ent.object orelse return err(.bad_handle)));
+        const info = vm.mmio();
+        if (!writeUserBytes(out_ptr, std.mem.asBytes(&info))) return err(.bad_arg);
+        return err(.ok);
+    } else return err(.denied);
 }
 
 fn sysDmaAlloc(npages: usize, out_va_ptr: usize, out_pa_ptr: usize) isize {

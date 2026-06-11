@@ -1,20 +1,31 @@
-// NS16550 UART. MMIO at 0x1000_0000 (QEMU virt riscv64).
+// NS16550 UART, driven through conduit's `driver.ns16550a` over the Mmio seam.
+// The register layout (THR/LSR + the THRE poll) lives in conduit and is shared
+// with Weir; this file keeps only the kernel-side concerns (the std.Io writer,
+// the RX stubs). The base defaults to QEMU virt rv64 and is upgraded by FDT
+// discovery via `setBase` (see kmain.discoverDevices).
 
 const std = @import("std");
+const conduit = @import("conduit");
 const mmio = @import("riscv").mmio;
 
-const UART_BASE: usize = 0x1000_0000;
+const DEFAULT_BASE: usize = 0x1000_0000;
+var base: usize = DEFAULT_BASE;
 
-const Reg = struct {
-    const THR = UART_BASE + 0;
-    const LSR = UART_BASE + 5;
-};
+/// Point the driver at a discovered MMIO base. Called once at boot before the
+/// console is used in anger; a no-op when discovery returns the same address.
+pub fn setBase(phys: usize) void {
+    base = phys;
+}
 
-const LSR_THRE: u8 = 1 << 5;
+// A conduit Ns16550a over `base`, honoring the kernel's phys->virt device
+// offset (0 on every current riscv boot path, so this is bit-identical to the
+// old `@ptrFromInt(phys)` pokes, but routed through one seam).
+inline fn dev() conduit.driver.ns16550a.Ns16550a {
+    return .{ .mmio = conduit.Mmio.direct(base + mmio.offset) };
+}
 
 pub fn putc(c: u8) void {
-    while ((mmio.read(u8, Reg.LSR) & LSR_THRE) == 0) {}
-    mmio.write(u8, Reg.THR, c);
+    dev().putc(c);
 }
 
 pub fn write(s: []const u8) void {

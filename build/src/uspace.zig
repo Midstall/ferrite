@@ -218,6 +218,39 @@ fn buildBinC(
     return .{ .macho = macho };
 }
 
+// Assemble a flat vmexec guest (.S + linker script) into a raw binary, loadable
+// at the guest base. Used for the timer demo guests. `code_model` is .medium
+// for riscv (medany), .default for aarch64.
+fn buildFlatGuest(
+    b: *std.Build,
+    arch: std.Target.Cpu.Arch,
+    src: []const u8,
+    ld: []const u8,
+    name: []const u8,
+    code_model: std.builtin.CodeModel,
+) std.Build.LazyPath {
+    const target = b.resolveTargetQuery(.{
+        .cpu_arch = arch,
+        .os_tag = .freestanding,
+        .abi = .none,
+        .cpu_model = .baseline,
+    });
+    const mod = b.createModule(.{
+        .root_source_file = b.path("uspace/vmguest/empty.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+        .code_model = code_model,
+    });
+    mod.addAssemblyFile(b.path(src));
+    const exe = b.addExecutable(.{ .name = name, .root_module = mod });
+    exe.setLinkerScript(b.path(ld));
+    exe.entry = .{ .symbol_name = "_start" };
+    exe.pie = false;
+    exe.bundle_compiler_rt = false;
+    const bin = b.addObjCopy(exe.getEmittedBin(), .{ .basename = name, .format = .bin });
+    return bin.getOutput();
+}
+
 pub fn registerStep(b: *std.Build, optimize_in: std.builtin.OptimizeMode, tools: tools_mod.Tools, zoneinfo: std.Build.LazyPath, ca_bundle: std.Build.LazyPath, board: common.Board) std.Build.LazyPath {
     const keygen = tools.keygen;
     const elf2macho = tools.elf2macho;
@@ -484,6 +517,31 @@ pub fn registerStep(b: *std.Build, optimize_in: std.builtin.OptimizeMode, tools:
         .binds = &.{"nameserver=channel_send:wg"},
     });
 
+    // vmboot boots a whole guest kernel like QEMU; vmexec sandboxes a single
+    // program inside a VM. Both own guest RAM (mmio_map) and read images via the
+    // filesystem (nameserver).
+    const vmboot = buildBin(b, target, optimize, ferrite_lib, elf2macho, dev_key_lp, .{
+        .name = "vmboot",
+        .src = "uspace/vmboot/src/main.zig",
+        .authority = "0x14", // channel_create | mmio_map (owns guest RAM)
+        .binds = &.{"nameserver=channel_send:wg"},
+    });
+
+    const vmexec = buildBin(b, target, optimize, ferrite_lib, elf2macho, dev_key_lp, .{
+        .name = "vmexec",
+        .src = "uspace/vmexec/src/main.zig",
+        .authority = "0x14", // channel_create | mmio_map (owns guest RAM)
+        .binds = &.{"nameserver=channel_send:wg"},
+    });
+
+    // A tiny program for validating the vmexec sandbox.
+    const jailtest = buildBin(b, target, optimize, ferrite_lib, elf2macho, dev_key_lp, .{
+        .name = "jailtest",
+        .src = "uspace/jailtest/src/main.zig",
+        .authority = "0x10",
+        .binds = &.{"nameserver=channel_send:wg"},
+    });
+
     const hello_c = buildBinC(b, target, optimize, libc_lib, elf2macho, dev_key_lp, .{
         .name = "hello-c",
         .src = "uspace/hello-c/src/hello.c",
@@ -714,6 +772,9 @@ pub fn registerStep(b: *std.Build, optimize_in: std.builtin.OptimizeMode, tools:
     cpio_run.addPrefixedFileArg("bin/drv.tty=", drv_tty.macho);
     cpio_run.addPrefixedFileArg("bin/drv.initrd=", drv_initrd.macho);
     cpio_run.addPrefixedFileArg("bin/hello=", hello.macho);
+    cpio_run.addPrefixedFileArg("bin/vmboot=", vmboot.macho);
+    cpio_run.addPrefixedFileArg("bin/vmexec=", vmexec.macho);
+    cpio_run.addPrefixedFileArg("bin/jailtest=", jailtest.macho);
     cpio_run.addPrefixedFileArg("bin/hello-c=", hello_c.macho);
     cpio_run.addPrefixedFileArg("bin/cat=", cat.macho);
     cpio_run.addPrefixedFileArg("bin/evtest=", evtest.macho);
@@ -777,6 +838,19 @@ pub fn registerStep(b: *std.Build, optimize_in: std.builtin.OptimizeMode, tools:
     }
 
     cpio_run.addPrefixedFileArg("etc/services=", b.path("initrd/etc/services"));
+    // Demo guest for `vmexec` (flat RV64 S-mode image + an initrd payload).
+    cpio_run.addPrefixedFileArg("share/vmguest.bin=", b.path("initrd/share/vmguest.bin"));
+    cpio_run.addPrefixedFileArg("share/vmguest-arm64.bin=", b.path("initrd/share/vmguest-arm64.bin"));
+    cpio_run.addPrefixedFileArg("share/vmguest.initrd=", b.path("initrd/share/vmguest.initrd"));
+    // Per-arch virtual-timer demo guests (assembled from .S).
+    if (board == .@"qemu-virt-aarch64") {
+        const tg = buildFlatGuest(b, .aarch64, "uspace/vmguest/timer-arm64.S", "uspace/vmguest/flat-arm64.ld", "vmguest-timer-arm64.bin", .default);
+        cpio_run.addPrefixedFileArg("share/vmguest-timer-arm64.bin=", tg);
+    }
+    if (board == .@"qemu-virt-riscv64") {
+        const tg = buildFlatGuest(b, .riscv64, "uspace/vmguest/timer-riscv.S", "uspace/vmguest/flat-riscv.ld", "vmguest-timer-riscv.bin", .medium);
+        cpio_run.addPrefixedFileArg("share/vmguest-timer-riscv.bin=", tg);
+    }
     // NOTE: zig's Run cache does not always re-hash this directory's contents,
     // so after adding/removing/editing an /etc/init.d unit you may need to bust
     // the cache (`rm -rf .zig-cache/o .zig-cache/h`) for the change to land in

@@ -23,6 +23,7 @@ pub const Kind = enum(u8) {
     thread,
     process,
     irq,
+    vm,
 };
 
 /// Per-process opaque handle. 0 is reserved for "no handle".

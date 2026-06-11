@@ -3,6 +3,7 @@
 // in alongside esp32c6.
 
 const riscv = @import("riscv");
+pub const features = riscv.features;
 
 pub const cpu = riscv.cpu;
 pub const mmio = riscv.mmio;

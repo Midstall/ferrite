@@ -1,6 +1,7 @@
 pub const x86 = @import("x86");
 
 pub const uart = x86.uart;
+pub const features = x86.features;
 pub const cpu = @import("cpu.zig");
 pub const idt = @import("idt.zig");
 pub const mmu = @import("mmu.zig");

@@ -99,6 +99,8 @@ pub fn build(
     arch_options: ?*std.Build.Module,
     kernel_options: *std.Build.Module,
     initrd_lp: ?std.Build.LazyPath,
+    hyp: bool,
+    hyp_real: bool,
 ) void {
     const cfg = config(board);
     const target = b.resolveTargetQuery(cfg.target);
@@ -113,9 +115,21 @@ pub fn build(
         const riscv_mod = common.freestandingModule(b, b.path("kernel/src/arch/riscv/riscv.zig"), target, optimize, cfg.code_model);
         arch_mod.addImport("riscv", riscv_mod);
     }
+    // The arch leaf drivers (UART/CLINT/GIC) on migrated boards bind conduit's
+    // drivers over the Mmio seam, so conduit must reach arch_mod too. It's the
+    // same cached module instance kernel_mod gets, so the types match across the
+    // boundary. Gated to the arches actually migrated so conduit isn't compiled
+    // for boards that don't use it yet.
+    if (board == .@"qemu-virt-riscv64" or board == .@"qemu-virt-aarch64") {
+        arch_mod.addImport("conduit", common.conduitModule(b, target, optimize));
+    }
     const kernel_mod = common.freestandingModule(b, b.path("kernel/src/kmain.zig"), target, optimize, cfg.code_model);
     kernel_mod.addImport("arch", arch_mod);
     kernel_mod.addImport("kernel-options", kernel_options);
+    // conduit is available to the kernel module; kmain only references it when
+    // kernel_options.have_conduit is set (today: qemu-virt-riscv64), so other
+    // boards routed through generic.build never analyze it.
+    kernel_mod.addImport("conduit", common.conduitModule(b, target, optimize));
 
     const start_mod = common.freestandingModule(b, b.path(b.fmt("{s}/start.zig", .{cfg.arch_dir})), target, optimize, cfg.code_model);
     start_mod.addImport("kernel", kernel_mod);
@@ -150,11 +164,34 @@ pub fn build(
         break :blk img.getOutput();
     } else kernel.getEmittedBin();
 
-    const run_cmd = b.addSystemCommand(cfg.qemu_cmd);
+    // Hyp mode: enter at EL2 by enabling the machine's virtualization extensions
+    // so the kernel can install the microVM hypervisor (it then drops to EL1).
+    // Only aarch64 needs the machine's virtualization extensions toggled on; the
+    // riscv H extension is already in qemu's virt CPU, so -Dhyp there just enables
+    // the in-kernel demo (via kernel-options) without touching the qemu machine.
+    const qemu_cmd: []const []const u8 = if (hyp and board == .@"qemu-virt-aarch64") blk: {
+        const out = b.allocator.alloc([]const u8, cfg.qemu_cmd.len) catch @panic("oom");
+        for (cfg.qemu_cmd, 0..) |a, i| {
+            // Stay on GICv2: the host's GICv3 backend intermittently faults under
+            // this config, and GICv2 has the GICH/GICV hardware VGIC we need.
+            out[i] = if (std.mem.eql(u8, a, "virt")) "virt,virtualization=on" else a;
+        }
+        break :blk out;
+    } else cfg.qemu_cmd;
+
+    const run_cmd = b.addSystemCommand(qemu_cmd);
     run_cmd.addFileArg(qemu_input);
     if (initrd_lp) |lp| {
         run_cmd.addArg("-initrd");
         run_cmd.addFileArg(lp);
+    }
+    // Hyp mode: load a pristine copy of the same image into the reserved guest
+    // region (PA 0x48000000) so the hypervisor can boot it as a guest VM
+    // (Ferrite-in-Ferrite). The run depends on the install that writes it.
+    if (hyp and hyp_real) {
+        run_cmd.step.dependOn(b.getInstallStep());
+        run_cmd.addArg("-device");
+        run_cmd.addArg(b.fmt("loader,file={s},addr=0x4e000000,force-raw=on", .{b.getInstallPath(.bin, "ferrite.img")}));
     }
     const pcap_name = b.fmt("ferrite-{s}-{s}.pcap", .{ @tagName(board), @tagName(boot) });
     common.addQemuVirtioArgs(run_cmd, pcap_name);

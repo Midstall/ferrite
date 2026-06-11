@@ -19,6 +19,8 @@ pub fn build(b: *std.Build) void {
     const sig_max_keys = b.option(u32, "sig-max-keys", "Max number of signature trust roots the kernel can hold at once (default 16)") orelse 16;
     const page_size = b.option(u32, "page-size", "Default page size in bytes. Sets the initial value of `memory.pageSize()`; cmdline `pagesize=N` overrides at boot. (default 4096)") orelse 4096;
     const rootfs = b.option(common.RootfsType, "rootfs", "Root filesystem: initrd (default), or ext4 (build an ext4 disk image from the userspace tree and boot off it). aarch64 limine only for now.") orelse .initrd;
+    const hyp = b.option(bool, "hyp", "aarch64 raw only: enter at EL2 (qemu virtualization=on) so the kernel can run the microVM hypervisor. Host drops to EL1 to boot.") orelse false;
+    const hyp_real = b.option(bool, "hyp-real", "aarch64 raw + -Dhyp: load a pristine ferrite.img into the guest region and boot it as a real guest VM (Ferrite-in-Ferrite). Default runs the synthetic guest demo.") orelse false;
     if (page_size != 4096 and page_size != 16384 and page_size != 65536) {
         const fail = b.addFail(b.fmt("-Dpage-size={d} not supported. Pick 4096, 16384, or 65536.", .{page_size}));
         b.getInstallStep().dependOn(&fail.step);
@@ -51,9 +53,17 @@ pub fn build(b: *std.Build) void {
         else => null,
     };
 
+    const cpu_features = b.option(common.CpuFeaturesPolicy, "cpu-features", "How to decide which optional CPU features (FP/SIMD, virtualization, crypto, atomics) to use: auto (prefer runtime detection, default), detect (runtime only), or fixed (build-time -Dcpu set only)") orelse .auto;
+
     const kernel_options = common.kernelOptions(b, .{
         .sig_max_keys = sig_max_keys,
         .page_size = page_size,
+        .cpu_features = cpu_features,
+        .hyp = hyp,
+        // conduit's discovery + leaf drivers back the arch device layer on these
+        // boards. kmain runs device discovery when this is set; the arch leaf
+        // drivers bind conduit drivers over the Mmio seam.
+        .have_conduit = board == .@"qemu-virt-riscv64" or board == .@"qemu-virt-aarch64",
     });
 
     if (!common.supports(board, boot)) {
@@ -78,15 +88,15 @@ pub fn build(b: *std.Build) void {
         .@"qemu-virt-aarch64" => switch (boot) {
             .limine => aarch64.buildLimine(b, optimize, arch_options.?, kernel_options, initrd_lp.?, rootfs),
             .uefi => aarch64.buildUefi(b, optimize, arch_options.?, kernel_options, initrd_lp.?),
-            .raw => generic.build(b, optimize, board, boot, arch_options, kernel_options, initrd_lp),
+            .raw => generic.build(b, optimize, board, boot, arch_options, kernel_options, initrd_lp, hyp, hyp_real),
             .multiboot, .multiboot2, .esp_image => unreachable,
         },
         .@"qemu-virt-riscv64" => switch (boot) {
             .limine => riscv64.buildLimine(b, optimize, kernel_options, initrd_lp.?),
-            .raw => generic.build(b, optimize, board, boot, arch_options, kernel_options, initrd_lp),
+            .raw => generic.build(b, optimize, board, boot, arch_options, kernel_options, initrd_lp, hyp, false),
             .multiboot, .multiboot2, .uefi, .esp_image => unreachable,
         },
-        .@"qemu-pc-i386" => generic.build(b, optimize, board, boot, arch_options, kernel_options, initrd_lp),
+        .@"qemu-pc-i386" => generic.build(b, optimize, board, boot, arch_options, kernel_options, initrd_lp, false, false),
         .@"esp32-c6" => esp32.buildC6(b, optimize, kernel_options, initrd_lp, host_tools.elf2espimage),
     }
 }

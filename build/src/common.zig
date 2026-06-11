@@ -73,16 +73,40 @@ pub fn aarch64ArchOptions(b: *std.Build, gic_version: GicVersion) *std.Build.Mod
     return options.createModule();
 }
 
+// Policy for deciding which optional CPU features the kernel uses at runtime.
+//   detect  - trust runtime ID-register/CPUID/misa probing only
+//   fixed   - trust the build-time -Dcpu feature set only (fully static)
+//   auto    - prefer runtime detection; fall back to the build-time set per
+//             feature when the silicon doesn't report it
+pub const CpuFeaturesPolicy = enum { auto, detect, fixed };
+
 pub const KernelOptions = struct {
     sig_max_keys: u32,
     page_size: u32,
+    cpu_features: CpuFeaturesPolicy = .auto,
+    hyp: bool = false,
+    /// Whether this board wires conduit into the kernel module. The kernel uses
+    /// it (kmain) only behind this comptime flag, so boards that do not provide
+    /// the conduit import still compile.
+    have_conduit: bool = false,
 };
 
 pub fn kernelOptions(b: *std.Build, opts: KernelOptions) *std.Build.Module {
     const options = b.addOptions();
     options.addOption(u32, "sig_max_keys", opts.sig_max_keys);
     options.addOption(u32, "page_size", opts.page_size);
+    options.addOption(CpuFeaturesPolicy, "cpu_features", opts.cpu_features);
+    options.addOption(bool, "hyp", opts.hyp);
+    options.addOption(bool, "have_conduit", opts.have_conduit);
     return options.createModule();
+}
+
+/// The conduit HAL module, built for the kernel's target. conduit's build.zig
+/// wires its own transitive deps (dtree/almanac), so the kernel only ever talks
+/// to conduit. Used by boards that set `have_conduit`.
+pub fn conduitModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
+    const dep = b.dependency("conduit", .{ .target = target, .optimize = optimize });
+    return dep.module("conduit");
 }
 
 // virtio-net-pci + virtio-rng-pci with slirp v4/v6 + hostfwd 2222->22 + pcap.

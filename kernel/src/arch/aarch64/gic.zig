@@ -17,6 +17,19 @@ fn probe() Detected {
     return if (gic_field >= 1) .v3 else .v2;
 }
 
+/// Point both GIC drivers at discovered MMIO bases (DT reg order: bases[0] =
+/// distributor, bases[1] = CPU interface (v2) / redistributor (v3)). Must run
+/// before init(); the version is not probed yet, so both drivers are seeded and
+/// only the active one is used. A short list (no second window) is ignored, so
+/// the compiled-in defaults stand.
+pub fn setBases(bases: []const u64) void {
+    if (bases.len < 2) return;
+    const dist: usize = @intCast(bases[0]);
+    const second: usize = @intCast(bases[1]);
+    v2.setBases(dist, second);
+    v3.setBases(dist, second);
+}
+
 pub fn init() void {
     switch (arch_options.gic_version) {
         .v2 => v2.init(),

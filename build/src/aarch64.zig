@@ -12,9 +12,13 @@ pub fn buildLimine(b: *std.Build, optimize: std.builtin.OptimizeMode, arch_optio
 
     const arch_mod = common.freestandingModule(b, b.path(b.fmt("{s}/arch.zig", .{arch_dir})), target, optimize, .default);
     arch_mod.addImport("arch-options", arch_options);
+    // conduit backs the arch leaf drivers (PL011/GIC) over the Mmio seam, and the
+    // kernel uses it for FDT discovery; both modules share the cached instance.
+    arch_mod.addImport("conduit", common.conduitModule(b, target, optimize));
     const kernel_mod = common.freestandingModule(b, b.path("kernel/src/kmain.zig"), target, optimize, .default);
     kernel_mod.addImport("arch", arch_mod);
     kernel_mod.addImport("kernel-options", kernel_options);
+    kernel_mod.addImport("conduit", common.conduitModule(b, target, optimize));
 
     const start_mod = common.freestandingModule(b, b.path(b.fmt("{s}/boot/limine.zig", .{arch_dir})), target, optimize, .default);
     start_mod.addImport("kernel", kernel_mod);
@@ -151,6 +155,7 @@ pub fn buildUefi(b: *std.Build, optimize: std.builtin.OptimizeMode, arch_options
         .single_threaded = true,
     });
     arch_mod.addImport("arch-options", arch_options);
+    arch_mod.addImport("conduit", common.conduitModule(b, target, optimize));
     arch_mod.addAssemblyFile(b.path(b.fmt("{s}/vectors.S", .{arch_dir})));
     arch_mod.addAssemblyFile(b.path(b.fmt("{s}/context_switch.S", .{arch_dir})));
     arch_mod.addAssemblyFile(b.path(b.fmt("{s}/secondary_entry.S", .{arch_dir})));
@@ -162,6 +167,7 @@ pub fn buildUefi(b: *std.Build, optimize: std.builtin.OptimizeMode, arch_options
     });
     kernel_mod.addImport("arch", arch_mod);
     kernel_mod.addImport("kernel-options", kernel_options);
+    kernel_mod.addImport("conduit", common.conduitModule(b, target, optimize));
 
     const uefi_mod = b.createModule(.{
         .root_source_file = b.path(b.fmt("{s}/boot/uefi.zig", .{arch_dir})),

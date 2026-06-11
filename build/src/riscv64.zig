@@ -18,9 +18,13 @@ pub fn buildLimine(b: *std.Build, optimize: std.builtin.OptimizeMode, kernel_opt
 
     const riscv_mod = common.freestandingModule(b, b.path("kernel/src/arch/riscv/riscv.zig"), target, optimize, code_model);
     arch_mod.addImport("riscv", riscv_mod);
+    // The arch leaf drivers (uart_ns16550) bind conduit drivers, so conduit must
+    // reach arch_mod as well as kernel_mod. Same cached instance, types match.
+    arch_mod.addImport("conduit", common.conduitModule(b, target, optimize));
     const kernel_mod = common.freestandingModule(b, b.path("kernel/src/kmain.zig"), target, optimize, code_model);
     kernel_mod.addImport("arch", arch_mod);
     kernel_mod.addImport("kernel-options", kernel_options);
+    kernel_mod.addImport("conduit", common.conduitModule(b, target, optimize));
 
     const start_mod = common.freestandingModule(b, b.path(b.fmt("{s}/boot/limine.zig", .{arch_dir})), target, optimize, code_model);
     start_mod.addImport("kernel", kernel_mod);

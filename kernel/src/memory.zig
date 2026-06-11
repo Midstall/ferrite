@@ -330,6 +330,13 @@ pub inline fn physToVirt(phys: u64) usize {
     return @intCast(phys + hhdm_offset);
 }
 
+/// Non-inline variant whose address can be taken as a plain `*const fn`.
+/// Used by the VMM facility (vmm.zig / arch hyp.zig) to reach guest page-table
+/// pages, since those aren't identity-mapped on a higher-half kernel.
+pub fn physToVirtFn(phys: u64) usize {
+    return physToVirt(phys);
+}
+
 /// Only valid for addresses obtained via `physToVirt`.
 pub inline fn virtToPhys(virt: usize) u64 {
     return @as(u64, virt) - hhdm_offset;

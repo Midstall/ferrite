@@ -1,4 +1,5 @@
 const arch = @import("arch");
+const kernel_options = @import("kernel-options");
 
 pub const memory = @import("memory.zig");
 pub const heap = @import("heap.zig");
@@ -15,6 +16,7 @@ pub const process = @import("process.zig");
 pub const syscall = @import("syscall.zig");
 pub const console = @import("console.zig");
 pub const cpu = @import("cpu.zig");
+pub const cpufeatures = @import("cpufeatures.zig");
 pub const sync = @import("sync.zig");
 pub const initrd = @import("initrd.zig");
 pub const cmdline = @import("cmdline.zig");
@@ -23,8 +25,41 @@ pub const macho = @import("macho.zig");
 pub const loader = @import("loader.zig");
 pub const limine_proto = @import("limine_proto.zig");
 pub const timer = @import("timer.zig");
+pub const vmm = @import("vmm.zig");
 
 var smp_status_printed: bool = false;
+
+/// Bind the arch's leaf device drivers (UART, timer/CLINT, interrupt
+/// controller) to MMIO bases discovered from the device tree through conduit's
+/// Registry, instead of compiled-in constants. Each driver keeps a sensible
+/// default, so a board with no FDT, or a device conduit cannot match, simply
+/// keeps that default. Compiled only on boards that wire conduit
+/// (kernel_options.have_conduit); each branch is `@hasDecl`-gated so an arch
+/// that has not grown a `setBase`/`setBases` seam is skipped.
+fn discoverDevices() void {
+    const cb = @import("conduit_backend.zig");
+
+    if (@hasDecl(arch.uart, "setBase")) {
+        // Match only specific UART compatibles. The generic "arm,primecell" ID is
+        // carried by every PrimeCell peripheral (RTC, GPIO, SPI), so matching it
+        // would bind the console to whichever PrimeCell device the DTB lists first.
+        if (cb.findBase(.uart, &.{
+            "ns16550a", "ns16550", "snps,dw-apb-uart", "arm,pl011",
+        })) |base| arch.uart.setBase(base);
+    }
+
+    if (@hasDecl(arch, "clint") and @hasDecl(arch.clint, "setBase")) {
+        if (cb.findBase(.timer, &.{ "riscv,clint0", "sifive,clint0" })) |base|
+            arch.clint.setBase(base);
+    }
+
+    if (@hasDecl(arch, "gic") and @hasDecl(arch.gic, "setBases")) {
+        const bs = cb.findBases(.intc, &.{
+            "arm,gic-v3", "arm,gic-v3-its", "arm,gic-400", "arm,cortex-a15-gic", "arm,gic-v2",
+        });
+        if (bs.len > 0) arch.gic.setBases(bs.items[0..bs.len]);
+    }
+}
 
 fn schedTick() void {
     // Timer may fire before boot CPU installs tpidr_el1 (bringUpBoot runs after enableIrq).
@@ -72,6 +107,12 @@ pub export fn secondaryStart(cpu_id: u64) callconv(.c) noreturn {
 }
 
 pub fn kmain() callconv(.c) noreturn {
+    cpufeatures.init();
+    // Bind leaf drivers (UART/CLINT/GIC) to FDT-discovered bases before anything
+    // programs them: arch.traps.init() brings up the GIC, arch.timer.init() the
+    // CLINT, console.init() the UART. Discovery only walks the device tree and
+    // pokes module-level bases, so it is safe this early.
+    if (comptime kernel_options.have_conduit) discoverDevices();
     arch.traps.init();
     arch.usermode.init();
     arch.traps.user_fault_handler = &userFault;
@@ -89,6 +130,10 @@ pub fn kmain() callconv(.c) noreturn {
     arch.timer.init(10_000_000);
     timer.init();
     console.init();
+    // -Dhyp: run the arch's microVM demo once at boot. aarch64's runs earlier
+    // from the EL2 entry path (gated by hyp_active); riscv's H-extension demo
+    // runs here (mtvec is installed, and the world-switch saves/restores it).
+    if (kernel_options.hyp and @hasDecl(arch, "hypRiscvDemo")) arch.hypRiscvDemo(&memory.allocPages, &memory.physToVirtFn);
     // Point the per-CPU register at the boot Cpu BEFORE enabling IRQs.
     // TPIDR_EL1's reset value is architecturally UNKNOWN (garbage under KVM),
     // and an early timer IRQ -> schedTick/maybePreempt would dereference it.

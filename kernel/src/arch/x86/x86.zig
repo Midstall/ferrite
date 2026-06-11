@@ -2,3 +2,4 @@
 
 pub const io = @import("io.zig");
 pub const uart = @import("uart_16550_pio.zig");
+pub const features = @import("features.zig");

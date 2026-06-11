@@ -66,6 +66,14 @@ pub const SYS_SIGNAL: usize = 52;
 pub const SYS_SIGACTION: usize = 53;
 pub const SYS_SIGRETURN: usize = 54;
 
+pub const SYS_VM_CREATE: usize = 55;
+pub const SYS_VM_MAP: usize = 56;
+pub const SYS_VCPU_RUN: usize = 57;
+pub const SYS_VCPU_SET_REG: usize = 58;
+pub const SYS_VCPU_GET_REG: usize = 59;
+pub const SYS_VCPU_MMIO: usize = 60;
+pub const SYS_VCPU_EL0_ENTRY: usize = 61;
+
 // POSIX signal numbers (default action = terminate; no catchable handlers yet).
 pub const SIGINT: u32 = 2;
 pub const SIGKILL: u32 = 9;
@@ -431,6 +439,72 @@ pub fn dmaAlloc(npages: usize, out_va: *usize, out_pa: *u64) isize {
 pub fn allocPages(npages: usize, out_va: *usize) isize {
     return syscall2(SYS_ALLOC_PAGES, npages, @intFromPtr(out_va));
 }
+
+/// VM exit reasons returned by vcpuRun (mirrors the kernel's ExitReason).
+pub const VmExit = enum(isize) {
+    hypercall = 0, // guest SBI (riscv) / HVC (aarch64): a7/a0 carry the call
+    fault = 1, // unhandled guest exception: a7 = cause, a0 = fault addr
+    interrupt = 2, // a host interrupt fired during the guest
+    mmio = 3, // guest device access; query details via vcpuMmio (aarch64)
+    poweroff = 4, // guest asked to power off (aarch64 PSCI)
+};
+
+/// MMIO exit detail, filled by vcpuMmio after a `.mmio` exit.
+pub const VmMmio = extern struct {
+    addr: u64, // guest-physical device address
+    data: u64, // value the guest wrote (writes only)
+    size: u64, // access width in bytes
+    is_write: u64, // 1 = store, 0 = load
+    reg: u64, // guest GPR index (SET_REG it to satisfy a load)
+};
+
+/// Create a microVM and set its single vCPU's entry point. Returns a `.vm`
+/// capability handle (negative = error). riscv64 with the H extension only.
+pub fn vmCreate(entry_gpa: u64) isize {
+    return syscall1(SYS_VM_CREATE, @intCast(entry_gpa));
+}
+
+/// Back `npages` of guest-physical RAM at `gpa`, mapped into the guest's
+/// G-stage and into this process; *out_va receives the address to load into.
+pub fn vmMap(vm: u32, gpa: u64, npages: usize, out_va: *usize) isize {
+    return syscall4(SYS_VM_MAP, vm, @intCast(gpa), npages, @intFromPtr(out_va));
+}
+
+/// Run the vCPU until it traps out. On an SBI exit, *out_a7/*out_a0 carry the
+/// guest a7/a0 and the kernel has stepped past the ecall; on a fault they carry
+/// mcause/mtval. The return value is a VmExit (negative = error).
+pub fn vcpuRun(vm: u32, out_a7: *usize, out_a0: *usize) isize {
+    return syscall3(SYS_VCPU_RUN, vm, @intFromPtr(out_a7), @intFromPtr(out_a0));
+}
+
+/// Set guest GPR `idx` (x0..x31). Use for boot registers and SBI returns.
+pub fn vcpuSetReg(vm: u32, idx: usize, val: u64) isize {
+    return syscall3(SYS_VCPU_SET_REG, vm, idx, @intCast(val));
+}
+
+/// Read guest GPR `idx` (x0..x31) into *out.
+pub fn vcpuGetReg(vm: u32, idx: usize, out: *usize) isize {
+    return syscall3(SYS_VCPU_GET_REG, vm, idx, @intFromPtr(out));
+}
+
+/// Fetch the most recent exit's MMIO detail (valid after a `.mmio` exit).
+pub fn vcpuMmio(vm: u32, out: *VmMmio) isize {
+    return syscall2(SYS_VCPU_MMIO, vm, @intFromPtr(out));
+}
+
+/// Configure the vCPU to enter the guest unprivileged (aarch64 EL0+TGE / riscv64
+/// VU-mode), so a sandboxed program's syscalls trap straight to the hypervisor.
+/// `entry`/`sp` are guest-physical.
+pub fn vcpuEl0Entry(vm: u32, entry: u64, sp: u64) isize {
+    return syscall3(SYS_VCPU_EL0_ENTRY, vm, @intCast(entry), @intCast(sp));
+}
+
+// RISC-V GPR indices used by the SBI ABI.
+pub const REG_A0: usize = 10;
+pub const REG_A1: usize = 11;
+pub const REG_A2: usize = 12;
+pub const REG_A6: usize = 16;
+pub const REG_A7: usize = 17;
 
 /// Return a region previously obtained from allocPages/dmaAlloc/mmap to
 /// the kernel. The va MUST be the base of the original mapping.

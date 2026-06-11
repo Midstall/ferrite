@@ -3,3 +3,4 @@
 
 pub const cpu = @import("cpu.zig");
 pub const mmio = @import("mmio.zig");
+pub const features = @import("features.zig");

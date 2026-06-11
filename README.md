@@ -38,24 +38,33 @@ In kernel today:
 - Mach-O userspace binaries with Ed25519 signatures, verified on load.
 - TCP/IP networking on the QEMU virt targets (DHCP, DNS, NTP, TLS 1.3,
   HTTP, SSH server).
+- virtio drivers in userspace: GPU (multi-display, cursor, zero-copy
+  buffers), sound (PCM sink with a software synth), input (keyboard,
+  mouse, tablet), net, block, and rng.
+- Userspace VMM: the kernel owns the world-switch and exits to a U-mode
+  process. `vmboot` runs a whole guest kernel + initrd like QEMU (riscv64
+  H-extension, aarch64 EL2); `vmexec` sandboxes a single program inside a
+  hardware-isolated VM and proxies its syscalls through an allow-list.
 
 Targets in scope:
 
 - QEMU virt for aarch64, riscv64, i386, x86_64. Reaches a login prompt
   with sshd + wget over slirp networking.
-- ESP32-C6 (riscv32). DEF CON badge target. Reaches `kmain` and idles
-  cleanly. Userspace integration is deferred until the init binary is
-  small enough for the 4 MB flash + 512 KB SRAM budget.
+- ESP32-C6 (riscv32). A minimal target we are experimenting with to see how
+  far Ferrite shrinks. Reaches `kmain` and idles cleanly. Userspace
+  integration is deferred until the init binary is small enough for the
+  4 MB flash + 512 KB SRAM budget.
 
 ## Roadmap
 
-- **Graphics + audio** drivers (framebuffer, GPU command submission,
-  PCM audio) so the badge target has more than serial.
 - **`unshare`** - userspace utility to spawn a program inside a fresh
   namespace, mirroring Linux's tool.
-- **Hypervisor mode** - defer execution of selected programs into a
-  microVM (riscv H-extension on rv64, VT-x/AMD-V on x86_64, EL2 on
-  aarch64).
+- **Hypervisor mode** - boot an unmodified guest kernel in a microVM.
+  The userspace VMM works on riscv64 and aarch64; still ahead are a
+  real S-mode/EL1 guest kernel + DTB, VT-x/AMD-V on x86_64, and a
+  proper IRQ-driven guest timer.
+- **Graphics + audio showcase** - a software-rendered demo (DOOM 1993 +
+  Bad Apple, with live synthesised audio) to push the real-time path.
 
 ## Build
 

@@ -4,6 +4,9 @@
 
 pub const uart = @import("uart_ns16550.zig");
 pub const mmio = @import("riscv").mmio;
+// S-mode can't read misa, so detection differs from the M-mode arch.zig (which
+// re-exports riscv.features). See features_smode.zig.
+pub const features = @import("features_smode.zig");
 pub const cpu = @import("cpu_smode.zig");
 pub const traps = @import("traps_smode.zig");
 pub const timer = @import("timer_smode.zig");
