@@ -40,12 +40,20 @@ const ARGS_TOP: u64 = GUEST_BASE + WINDOW - 0x1000; // program's stack top
 
 // Where the guest's syscall ABI puts the number, args, and return value.
 // aarch64: nr=x8, args=x0..x7, ret=x0. riscv64: nr=a7(x17), args=a0..(x10..), ret=a0(x10).
+// x86_64: `syscall`, nr=rax(0), args=rdi(5)/rsi(4)/rdx(3)/r10(10)/r8(8)/r9(9), ret=rax(0).
 const is_riscv = builtin.cpu.arch == .riscv64;
-const NR_REG: usize = if (is_riscv) 17 else 8;
-const RET_REG: usize = if (is_riscv) 10 else 0;
+const is_x86 = builtin.cpu.arch == .x86_64;
+const NR_REG: usize = if (is_riscv) 17 else if (is_x86) 0 else 8;
+const RET_REG: usize = if (is_riscv) 10 else if (is_x86) 0 else 0;
+const x86_arg_regs = [_]usize{ 5, 4, 3, 10, 8, 9 }; // rdi, rsi, rdx, r10, r8, r9
 inline fn argReg(i: usize) usize {
-    return if (is_riscv) 10 + i else i;
+    if (is_riscv) return 10 + i;
+    if (is_x86) return x86_arg_regs[i];
+    return i;
 }
+// Reg index 16 is the kernel's pseudo-register for the long-mode sandbox guest
+// CR3 (see arch/x86_64/hyp.zig REG_GUEST_CR3).
+const REG_GUEST_CR3: usize = 16;
 
 // Ferrite-only Mach-O command: pointer rebases the loader must apply.
 const LC_FERRITE_REBASE: u32 = 0x1001;
@@ -490,9 +498,37 @@ fn parsePred(pred: []const u8, rule: *Rule) bool {
     return true;
 }
 
+// x86_64 long-mode sandbox guest paging: build an identity GVA->GPA table that
+// maps the whole guest window with 2 MiB pages, placed inside the window itself
+// (so the stage-2/EPT already covers it). The guest's CR3 walks these GPAs; the
+// stage-2 then maps GPA->HPA. Returns the PML4 guest-physical address.
+// Layout: PML4 at window+0xC0000, PDPT +0xC1000, PD +0xC2000 (all below the
+// program load at +1 MiB, so they never collide with segments/stack).
+const PT_OFF: u64 = 0x0c_0000;
+fn putPte(window: []u8, off: u64, value: u64) void {
+    std.mem.writeInt(u64, window[@intCast(off)..][0..8], value, .little);
+}
+fn buildIdentityPageTable(window: []u8) u64 {
+    const pml4_gpa = GUEST_BASE + PT_OFF;
+    const pdpt_gpa = GUEST_BASE + PT_OFF + PAGE;
+    const pd_gpa = GUEST_BASE + PT_OFF + 2 * PAGE;
+    const pml4_i = (GUEST_BASE >> 39) & 0x1ff;
+    const pdpt_i = (GUEST_BASE >> 30) & 0x1ff;
+    const pd_i0 = (GUEST_BASE >> 21) & 0x1ff;
+    // P|RW|US for the upper levels, + PS (2 MiB) for the leaves.
+    putPte(window, PT_OFF + pml4_i * 8, pdpt_gpa | 0x7);
+    putPte(window, PT_OFF + PAGE + pdpt_i * 8, pd_gpa | 0x7);
+    const npd = WINDOW / 0x20_0000; // 2 MiB pages spanning the window
+    var i: u64 = 0;
+    while (i < npd) : (i += 1) {
+        putPte(window, PT_OFF + 2 * PAGE + (pd_i0 + i) * 8, (GUEST_BASE + i * 0x20_0000) | 0x87);
+    }
+    return pml4_gpa;
+}
+
 pub fn main() void {
-    if (builtin.cpu.arch != .aarch64 and builtin.cpu.arch != .riscv64) {
-        err("vmexec: the sandbox needs aarch64 or riscv64; use vmboot to boot a VM\n", .{});
+    if (builtin.cpu.arch != .aarch64 and builtin.cpu.arch != .riscv64 and builtin.cpu.arch != .x86_64) {
+        err("vmexec: the sandbox needs aarch64, riscv64, or x86_64\n", .{});
         return;
     }
     const args = ferrite.argv;
@@ -557,8 +593,16 @@ pub fn main() void {
         return;
     };
 
-    // Enter the program unprivileged (aarch64 EL0+TGE / riscv VU-mode) so its
-    // syscalls trap straight to the hypervisor.
+    // x86_64 runs the sandbox in 64-bit long mode (the only mode that runs the
+    // 64-bit program), which needs guest paging. Build an identity GVA->GPA page
+    // table inside the window and hand its root to the kernel as the guest CR3.
+    if (is_x86) {
+        const cr3 = buildIdentityPageTable(window);
+        _ = sys.vcpuSetReg(vmh, REG_GUEST_CR3, cr3);
+    }
+
+    // Enter the program unprivileged (aarch64 EL0+TGE / riscv VU-mode / x86 CPL3
+    // long mode) so its syscalls trap straight to the hypervisor.
     _ = sys.vcpuEl0Entry(vmh, prog.entry, prog.sp);
 
     const code = runGuest(vmh, window);

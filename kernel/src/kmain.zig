@@ -134,6 +134,10 @@ pub fn kmain() callconv(.c) noreturn {
     // from the EL2 entry path (gated by hyp_active); riscv's H-extension demo
     // runs here (mtvec is installed, and the world-switch saves/restores it).
     if (kernel_options.hyp and @hasDecl(arch, "hypRiscvDemo")) arch.hypRiscvDemo(&memory.allocPages, &memory.physToVirtFn);
+    // x86_64 AMD SVM: enable SVM + run the in-kernel guest demo. enable() leaves
+    // the facility live for the userspace VMM afterward (no-ops on a CPU without
+    // SVM, e.g. every TCG run).
+    if (kernel_options.hyp and @hasDecl(arch, "hypX86Demo")) arch.hypX86Demo(&memory.allocPages, &memory.physToVirtFn);
     // Point the per-CPU register at the boot Cpu BEFORE enabling IRQs.
     // TPIDR_EL1's reset value is architecturally UNKNOWN (garbage under KVM),
     // and an early timer IRQ -> schedTick/maybePreempt would dereference it.

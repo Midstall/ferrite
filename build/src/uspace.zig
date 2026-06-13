@@ -845,6 +845,8 @@ pub fn registerStep(b: *std.Build, optimize_in: std.builtin.OptimizeMode, tools:
 
         const vg_arm = buildFlatGuest(b, .aarch64, "uspace/vmguest/vmguest-arm64.S", "uspace/vmguest/flat-arm64.ld", "vmguest-arm64.bin", .default);
         cpio_run.addPrefixedFileArg("share/vmguest-arm64.bin=", vg_arm);
+        const vg_x86 = buildFlatGuest(b, .x86, "uspace/vmguest/vmguest-x86.S", "uspace/vmguest/flat-x86.ld", "vmguest-x86.bin", .default);
+        cpio_run.addPrefixedFileArg("share/vmguest-x86.bin=", vg_x86);
     }
 
     cpio_run.addPrefixedFileArg("share/vmguest.initrd=", b.path("initrd/share/vmguest.initrd"));

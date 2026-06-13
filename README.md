@@ -43,8 +43,9 @@ In kernel today:
   mouse, tablet), net, block, and rng.
 - Userspace VMM: the kernel owns the world-switch and exits to a U-mode
   process. `vmboot` runs a whole guest kernel + initrd like QEMU (riscv64
-  H-extension, aarch64 EL2); `vmexec` sandboxes a single program inside a
-  hardware-isolated VM and proxies its syscalls through an allow-list.
+  H-extension, aarch64 EL2, x86_64 AMD SVM + Intel VT-x); `vmexec` sandboxes a single
+  program inside a hardware-isolated VM and proxies its syscalls through an
+  allow-list.
 
 Targets in scope:
 
@@ -60,9 +61,11 @@ Targets in scope:
 - **`unshare`** - userspace utility to spawn a program inside a fresh
   namespace, mirroring Linux's tool.
 - **Hypervisor mode** - boot an unmodified guest kernel in a microVM.
-  The userspace VMM works on riscv64 and aarch64; still ahead are a
-  real S-mode/EL1 guest kernel + DTB, VT-x/AMD-V on x86_64, and a
-  proper IRQ-driven guest timer.
+  The userspace VMM works on riscv64 and aarch64; the x86_64 backends
+  (AMD SVM + Intel VT-x, picked by CPU vendor at runtime) are in but
+  validatable only on real hardware with nested KVM, since QEMU TCG has
+  no nested virt. Still ahead are a real S-mode/EL1 guest kernel + DTB
+  and a proper IRQ-driven guest timer.
 - **Graphics + audio showcase** - a software-rendered demo (DOOM 1993 +
   Bad Apple, with live synthesised audio) to push the real-time path.
 

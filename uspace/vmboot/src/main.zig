@@ -5,9 +5,10 @@
 // Loads a flat guest kernel (and optional initrd) from the filesystem into guest
 // RAM, then runs it via the KVM-style microVM syscalls (#231). The kernel owns
 // the world-switch; vmboot loads the images, seeds the boot registers, and
-// services the guest's SBI/MMIO calls, relaying the guest's serial console to
-// its own stdout/stdin (the tty vmboot was given). riscv64 with the H extension
-// (SBI guest) and aarch64 under -Dhyp (PL011/PSCI guest).
+// services the guest's SBI/MMIO/PIO calls, relaying the guest's serial console
+// to its own stdout/stdin (the tty vmboot was given). riscv64 with the H
+// extension (SBI guest), aarch64 under -Dhyp (PL011/PSCI guest), and x86_64 with
+// SVM/VT-x (COM1 port-I/O guest).
 //
 // To sandbox a single Ferrite program inside a VM instead of booting a whole
 // guest kernel, use `vmexec`.
@@ -68,7 +69,7 @@ pub fn main() void {
 
     const vm = sys.vmCreate(GUEST_BASE);
     if (vm < 0) {
-        ferrite.console.print("vmboot: vm_create failed ({d}); needs riscv64 H\n", .{vm}) catch {};
+        ferrite.console.print("vmboot: vm_create failed ({d}); needs riscv64 H, aarch64 -Dhyp, or x86_64 SVM/VT-x\n", .{vm}) catch {};
         return;
     }
     const vmh: u32 = @intCast(vm);
@@ -108,7 +109,8 @@ pub fn main() void {
         _ = sys.vcpuSetReg(vmh, sys.REG_A1, initrd_gpa);
         _ = sys.vcpuSetReg(vmh, sys.REG_A2, initrd_size);
     } else {
-        // aarch64: x0 = initrd/DTB GPA (our flat guest reads its initrd from x0).
+        // aarch64: x0 = initrd/DTB GPA; x86: rax = initrd GPA (reg index 0 on
+        // both). Our flat guests read their initrd straight from that register.
         _ = sys.vcpuSetReg(vmh, 0, initrd_gpa);
     }
 
@@ -163,14 +165,31 @@ fn runGuest(vmh: u32, ram: [*]u8, ram_len: usize) void {
 
 // aarch64 guest console: a PL011 UART the hypervisor traps as MMIO.
 const UART_BASE: u64 = 0x0900_0000;
+// x86 guest console: COM1 (16550), which the hypervisor traps as port I/O.
+const COM1: u64 = 0x3f8;
 
-/// Handle one MMIO exit (aarch64). Relays UART transmit to the tty and keeps
-/// the guest's console driver happy on reads. Returns false to stop the VM.
+/// Handle one MMIO exit. Relays the guest's console writes to the tty and keeps
+/// its console driver happy on reads. aarch64 uses a PL011 at MMIO 0x09000000;
+/// x86 uses COM1 port I/O (the `.mmio` exit carries the port in `addr`). Returns
+/// false to stop the VM.
 fn serviceMmio(vmh: u32, ram: [*]u8, ram_len: usize) bool {
     _ = ram;
     _ = ram_len;
     var m: sys.VmMmio = undefined;
     if (sys.vcpuMmio(vmh, &m) < 0) return true;
+    if (builtin.cpu.arch == .x86_64) {
+        // COM1: 0x3F8 = data (THR/RBR), 0x3FD = line status (LSR).
+        if (m.is_write != 0) {
+            if (m.addr == COM1) writeByte(@truncate(m.data));
+        } else if (m.reg < 16) {
+            const v: u64 = switch (m.addr) {
+                COM1 + 5 => 0x60, // LSR: THRE | TEMT -> transmitter ready
+                else => 0,
+            };
+            _ = sys.vcpuSetReg(vmh, @intCast(m.reg), v);
+        }
+        return true;
+    }
     if (m.addr >= UART_BASE and m.addr < UART_BASE + 0x1000) {
         const off = m.addr - UART_BASE;
         if (m.is_write != 0) {
@@ -180,10 +199,10 @@ fn serviceMmio(vmh: u32, ram: [*]u8, ram_len: usize) bool {
                 0x18 => 0x90, // UARTFR: TXFE|RXFE -> "ready to TX, nothing to RX"
                 else => 0,
             };
-            _ = sys.vcpuSetReg(vmh, m.reg, v);
+            _ = sys.vcpuSetReg(vmh, @intCast(m.reg), v);
         }
     } else if (m.is_write == 0 and m.reg < 31) {
-        _ = sys.vcpuSetReg(vmh, m.reg, 0); // unmapped device: reads as zero
+        _ = sys.vcpuSetReg(vmh, @intCast(m.reg), 0); // unmapped device: reads as zero
     }
     return true;
 }
