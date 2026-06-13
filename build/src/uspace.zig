@@ -838,9 +838,15 @@ pub fn registerStep(b: *std.Build, optimize_in: std.builtin.OptimizeMode, tools:
     }
 
     cpio_run.addPrefixedFileArg("etc/services=", b.path("initrd/etc/services"));
-    // Demo guest for `vmexec` (flat RV64 S-mode image + an initrd payload).
-    cpio_run.addPrefixedFileArg("share/vmguest.bin=", b.path("initrd/share/vmguest.bin"));
-    cpio_run.addPrefixedFileArg("share/vmguest-arm64.bin=", b.path("initrd/share/vmguest-arm64.bin"));
+
+    {
+        const vg_rv = buildFlatGuest(b, .riscv64, "uspace/vmguest/vmguest-riscv.S", "uspace/vmguest/flat-riscv.ld", "vmguest.bin", .medium);
+        cpio_run.addPrefixedFileArg("share/vmguest.bin=", vg_rv);
+
+        const vg_arm = buildFlatGuest(b, .aarch64, "uspace/vmguest/vmguest-arm64.S", "uspace/vmguest/flat-arm64.ld", "vmguest-arm64.bin", .default);
+        cpio_run.addPrefixedFileArg("share/vmguest-arm64.bin=", vg_arm);
+    }
+
     cpio_run.addPrefixedFileArg("share/vmguest.initrd=", b.path("initrd/share/vmguest.initrd"));
     // Per-arch virtual-timer demo guests (assembled from .S).
     if (board == .@"qemu-virt-aarch64") {
