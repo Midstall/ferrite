@@ -20,6 +20,14 @@
     .paths = .{
         "build.zig",
         "build.zig.zon",
-        "src",
+        "build",
+        "kernel",
+        "lib",
+        "libc",
+        "tools",
+        "uspace",
+        "zig-std",
+        "initrd",
+        "patches",
     },
 }

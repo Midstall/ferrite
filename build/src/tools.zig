@@ -94,6 +94,7 @@ pub fn register(
         const step = b.step(step_name, s.description);
         step.dependOn(&install.step);
         umbrella.dependOn(&install.step);
+        b.getInstallStep().dependOn(&install.step);
         assignTool(&out, s.name, exe);
     }
     return out;
