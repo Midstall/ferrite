@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const memory = @import("memory.zig");
+const dtree = @import("conduit").dtree;
 
 /// 0 if no DTB was provided.
 pub var dtb_phys: u64 = 0;
@@ -216,26 +217,62 @@ fn readCells(b: []const u8, cells: u32) ?u64 {
 // High-level queries.
 
 pub fn parseMemory(dtb_ptr: u64) bool {
-    var w = open(dtb_ptr) orelse return false;
+    const base: usize = @intCast(dtb_ptr);
+    if (beU32At(base) != FDT_MAGIC) {
+        return false;
+    }
+    const total: usize = @intCast(beU32At(base + 4));
+    const buf: []const u8 = @as([*]const u8, @ptrFromInt(base))[0..total];
+    var rdr = dtree.Reader.initBuffer(buf) catch {
+        return false;
+    };
+    var iter = rdr.nodeIterator();
+    // The memory node is a child of the root, so its `reg` is sized by the
+    // ROOT's #address-cells/#size-cells. Honour whatever the tree declares
+    // (dtree is cell-aware) instead of assuming a fixed 2/2 layout: creek's
+    // device tree uses 1/1. DT spec defaults apply if the root omits them.
+    var addr_cells: u32 = 2;
+    var size_cells: u32 = 1;
+    // The memory node is a child of the root, so its reg is sized by the ROOT's
+    // cells - which are the FIRST #address-cells/#size-cells in the tree (the
+    // root declares them before any child node). Capture only that first
+    // occurrence so a nested node's own cells (e.g. /cpus) never overrides it.
+    var addr_set = false;
+    var size_set = false;
+    var root_depth: ?usize = null;
     var in_memory = false;
     var found = false;
-    while (w.next()) |ev| switch (ev) {
-        .begin => |n| {
-            in_memory = n.depth == 2 and std.mem.startsWith(u8, n.name, "memory") and
-                (n.name.len == 6 or n.name[6] == '@');
-        },
-        .end => in_memory = false,
-        .prop => |p| {
-            if (!in_memory or !std.mem.eql(u8, p.name, "reg")) continue;
-            var off: usize = 0;
-            while (off + 16 <= p.data.len) : (off += 16) {
-                const base = readBe64(p.data[off..]);
-                const size = readBe64(p.data[off + 8 ..]);
-                memory.register(base, size, .usable);
-                found = true;
-            }
-        },
-    };
+    while (iter.next() catch return found) |node| {
+        switch (node) {
+            .begin => |b| {
+                if (root_depth == null) root_depth = b.depth;
+                in_memory = b.depth == root_depth.? + 1 and
+                    std.mem.startsWith(u8, b.name, "memory") and
+                    (b.name.len == 6 or b.name[6] == '@');
+            },
+            .end => in_memory = false,
+            .prop => |p| {
+                if (!addr_set and std.mem.eql(u8, p.name, "#address-cells") and p.value.len >= 4) {
+                    addr_cells = readBe32(p.value);
+                    addr_set = true;
+                }
+                if (!size_set and std.mem.eql(u8, p.name, "#size-cells") and p.value.len >= 4) {
+                    size_cells = readBe32(p.value);
+                    size_set = true;
+                }
+                if (in_memory and std.mem.eql(u8, p.name, "reg")) {
+                    const stride: usize = @as(usize, addr_cells + size_cells) * 4;
+                    var off: usize = 0;
+                    while (stride > 0 and off + stride <= p.value.len) : (off += stride) {
+                        const a = readCells(p.value[off..], addr_cells) orelse break;
+                        const s = readCells(p.value[off + @as(usize, addr_cells) * 4 ..], size_cells) orelse break;
+                        memory.register(a, s, .usable);
+                        found = true;
+                    }
+                }
+            },
+        }
+    }
     return found;
 }
 

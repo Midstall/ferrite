@@ -63,7 +63,7 @@ pub fn build(b: *std.Build) void {
         // conduit's discovery + leaf drivers back the arch device layer on these
         // boards. kmain runs device discovery when this is set; the arch leaf
         // drivers bind conduit drivers over the Mmio seam.
-        .have_conduit = board == .@"qemu-virt-riscv64" or board == .@"qemu-virt-aarch64",
+        .have_conduit = board == .@"qemu-virt-riscv64" or board == .@"qemu-virt-aarch64" or board == .creek,
     });
 
     if (!common.supports(board, boot)) {
@@ -83,20 +83,24 @@ pub fn build(b: *std.Build) void {
             .multiboot, .multiboot2 => x86_64.buildMultiboot(b, optimize, kernel_options, initrd_lp.?),
             .limine => x86_64.buildLimine(b, optimize, kernel_options, initrd_lp.?),
             .uefi => x86_64.buildUefi(b, optimize, kernel_options, initrd_lp.?),
-            .raw, .esp_image => unreachable,
+            .raw, .esp_image, .sbi => unreachable,
         },
         .@"qemu-virt-aarch64" => switch (boot) {
             .limine => aarch64.buildLimine(b, optimize, arch_options.?, kernel_options, initrd_lp.?, rootfs),
             .uefi => aarch64.buildUefi(b, optimize, arch_options.?, kernel_options, initrd_lp.?),
             .raw => generic.build(b, optimize, board, boot, arch_options, kernel_options, initrd_lp, hyp, hyp_real),
-            .multiboot, .multiboot2, .esp_image => unreachable,
+            .multiboot, .multiboot2, .esp_image, .sbi => unreachable,
         },
         .@"qemu-virt-riscv64" => switch (boot) {
             .limine => riscv64.buildLimine(b, optimize, kernel_options, initrd_lp.?),
             .raw => generic.build(b, optimize, board, boot, arch_options, kernel_options, initrd_lp, hyp, false),
-            .multiboot, .multiboot2, .uefi, .esp_image => unreachable,
+            .multiboot, .multiboot2, .uefi, .esp_image, .sbi => unreachable,
         },
         .@"qemu-pc-i386" => generic.build(b, optimize, board, boot, arch_options, kernel_options, initrd_lp, false, false),
         .@"esp32-c6" => esp32.buildC6(b, optimize, kernel_options, initrd_lp, host_tools.elf2espimage),
+        .creek => switch (boot) {
+            .sbi => riscv64.buildSbi(b, optimize, kernel_options, initrd_lp.?),
+            .raw, .multiboot, .multiboot2, .limine, .uefi, .esp_image => unreachable,
+        },
     }
 }

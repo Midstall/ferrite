@@ -61,6 +61,59 @@ fn discoverDevices() void {
     }
 }
 
+/// MMIO base of a hardware Ed25519-verify accelerator (0 = none). Forward-
+/// compatible: boards whose kernel-options predate this field compile with 0.
+const verify_accel_base: usize =
+    if (@hasDecl(kernel_options, "ed25519_verify_base")) kernel_options.ed25519_verify_base else 0;
+
+/// Hardware Ed25519 verify, bound over the configured accelerator window through
+/// the conduit HAL. Installed as `signature.ed25519_backend` (see
+/// [installVerifyAccel]). Only analyzed when a non-zero base is configured (the
+/// branch in [installVerifyAccel] is comptime-pruned otherwise), so boards
+/// without a verify accelerator never resolve the conduit import here. This is a
+/// static-base bind (no device-tree discovery), so it is independent of
+/// `have_conduit`; a board that sets a base must still provide the conduit
+/// module to the kernel.
+fn hwVerifyEd25519(
+    pubkey: *const [32]u8,
+    sig: *const [64]u8,
+    digest: *const [32]u8,
+) bool {
+    const conduit = @import("conduit");
+    const drv = conduit.driver.albion_ed25519.bind(conduit.Mmio.direct(verify_accel_base));
+    return drv.verifySig(pubkey.*, sig.*, digest.*);
+}
+
+/// Install the hardware signature-verify backend when the board wired one. Same
+/// board-driven, conduit-gated discipline as [discoverDevices].
+fn installVerifyAccel() void {
+    if (comptime verify_accel_base != 0) {
+        signature.ed25519_backend = &hwVerifyEd25519;
+    }
+}
+
+/// MMIO base of a hardware integrity descriptor (0 = none). Forward-compatible
+/// like [verify_accel_base].
+const integrity_base: usize =
+    if (@hasDecl(kernel_options, "integrity_base")) kernel_options.integrity_base else 0;
+
+/// Record the platform's software-integrity state in the hardware descriptor
+/// when the board has one. If signature enforcement is NOT active (permissive /
+/// warning mode), the SEP loads code it did not verify, so the SEP-software
+/// component is marked FAILED (sticky). Only analyzed when a base is configured,
+/// so boards without a descriptor never resolve the conduit import here.
+fn recordIntegrity() void {
+    if (comptime integrity_base != 0) {
+        const conduit = @import("conduit");
+        const desc = conduit.driver.albion_integrity.bind(conduit.Mmio.direct(integrity_base));
+        if (signature.status == .warning) {
+            desc.markComponentFailed(
+                conduit.driver.albion_integrity.Integrity.component_sep_software,
+            );
+        }
+    }
+}
+
 fn schedTick() void {
     // Timer may fire before boot CPU installs tpidr_el1 (bringUpBoot runs after enableIrq).
     if (arch.cpu.thisCpuPtr() == 0) return;
@@ -122,6 +175,12 @@ pub fn kmain() callconv(.c) noreturn {
     if (@hasDecl(arch.traps, "take_signal_hook")) arch.traps.take_signal_hook = &takeSignal;
     syscall.init();
     signature.init();
+    // Install a hardware verify accelerator (if the board wired one) before any
+    // userspace image is loaded and verified.
+    installVerifyAccel();
+    // Record the software-integrity state in the hardware descriptor (if any):
+    // permissive mode means code loads unverified, which attestation must show.
+    recordIntegrity();
     acpi.init();
     // Wire scheduler hooks before the first tick.
     arch.traps.preempt_hook = &sched.maybePreempt;

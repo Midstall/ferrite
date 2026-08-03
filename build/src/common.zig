@@ -6,6 +6,10 @@ pub const Board = enum {
     @"qemu-pc-i386",
     @"qemu-pc-x86_64",
     @"esp32-c6",
+    /// Midstall creek SoC (River rc1-s RV64) on the Arty S7, booted as an
+    /// S-mode payload under the Weir SBI. Everything is discovered from the
+    /// device tree Weir hands off in a1; nothing about the map is assumed.
+    creek,
 };
 
 pub const GicVersion = enum { auto, v2, v3 };
@@ -24,35 +28,44 @@ pub const BootProtocol = enum {
     /// Espressif image format (header + segments + SHA-256). ROM loader
     /// reads this from flash. We supply our own second-stage bootloader.
     esp_image,
+    /// Bare S-mode entry from an SBI (Weir / OpenSBI): a0=hartid, a1=dtb,
+    /// satp=Bare. No bootloader boot-info; the device tree is the only source
+    /// of platform facts. See kernel/src/arch/riscv64/boot/sbi.zig.
+    sbi,
 };
 
 pub fn supports(board: Board, boot: BootProtocol) bool {
     return switch (board) {
         .@"qemu-virt-aarch64" => switch (boot) {
             .raw, .limine, .uefi => true,
-            .multiboot, .multiboot2, .esp_image => false,
+            .multiboot, .multiboot2, .esp_image, .sbi => false,
         },
         .@"qemu-virt-riscv64" => switch (boot) {
             .raw, .limine => true,
             // Zig 0.16 COFF writer can't emit riscv64 PE.
             .uefi => false,
-            .multiboot, .multiboot2, .esp_image => false,
+            .multiboot, .multiboot2, .esp_image, .sbi => false,
         },
         .@"qemu-pc-i386" => switch (boot) {
             .multiboot, .multiboot2 => true,
             .raw => false,
             // Limine dropped IA-32; OVMF-IA32 missing from nixpkgs.
             .limine => false,
-            .uefi, .esp_image => false,
+            .uefi, .esp_image, .sbi => false,
         },
         .@"qemu-pc-x86_64" => switch (boot) {
             .multiboot, .multiboot2, .limine, .uefi => true,
             // qemu -kernel rejects ELF64 without a multiboot header.
-            .raw, .esp_image => false,
+            .raw, .esp_image, .sbi => false,
         },
         .@"esp32-c6" => switch (boot) {
             .esp_image => true,
             else => false,
+        },
+        .creek => switch (boot) {
+            // Weir hands off in S-mode; the SBI boot is the only creek path.
+            .sbi => true,
+            .raw, .multiboot, .multiboot2, .limine, .uefi, .esp_image => false,
         },
     };
 }
@@ -64,6 +77,7 @@ pub fn defaultProtocol(board: Board) BootProtocol {
         .@"qemu-pc-i386" => .multiboot,
         .@"qemu-pc-x86_64" => .multiboot,
         .@"esp32-c6" => .esp_image,
+        .creek => .sbi,
     };
 }
 
@@ -89,6 +103,16 @@ pub const KernelOptions = struct {
     /// it (kmain) only behind this comptime flag, so boards that do not provide
     /// the conduit import still compile.
     have_conduit: bool = false,
+    /// MMIO base of a hardware Ed25519-verify accelerator, or 0 if the board has
+    /// none. When non-zero (and `have_conduit`), kmain installs it as the
+    /// signature-verify backend so enforcing-mode checks run in hardware instead
+    /// of the impractically slow software path (e.g. the Albion SEP). 0 = none.
+    ed25519_verify_base: usize = 0,
+    /// MMIO base of a hardware integrity descriptor (sticky-fail attestation),
+    /// or 0 if the board has none. When non-zero, kmain marks the SEP-software
+    /// component FAILED if signature enforcement is not active (the platform
+    /// loads code it did not verify). 0 = none.
+    integrity_base: usize = 0,
 };
 
 pub fn kernelOptions(b: *std.Build, opts: KernelOptions) *std.Build.Module {
@@ -98,6 +122,8 @@ pub fn kernelOptions(b: *std.Build, opts: KernelOptions) *std.Build.Module {
     options.addOption(CpuFeaturesPolicy, "cpu_features", opts.cpu_features);
     options.addOption(bool, "hyp", opts.hyp);
     options.addOption(bool, "have_conduit", opts.have_conduit);
+    options.addOption(usize, "ed25519_verify_base", opts.ed25519_verify_base);
+    options.addOption(usize, "integrity_base", opts.integrity_base);
     return options.createModule();
 }
 

@@ -61,10 +61,8 @@ export fn zigStart(dtb_ptr: u64) noreturn {
 
 pub const panic = std.debug.FullPanic(panicFn);
 
-fn panicFn(msg: []const u8, _: ?usize) noreturn {
+fn panicFn(msg: []const u8, ret_addr: ?usize) noreturn {
     @branchHint(.cold);
-    arch.uart.write("\n[PANIC] ");
-    arch.uart.write(msg);
-    arch.uart.write("\n");
+    arch.uart.print("\n[PANIC] {s} @ 0x{x}\n", .{ msg, ret_addr orelse @returnAddress() });
     while (true) asm volatile ("wfi");
 }

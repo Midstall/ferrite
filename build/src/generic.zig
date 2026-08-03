@@ -87,7 +87,8 @@ fn config(board: Board) Config {
                 "kernel/src/arch/i386/context_switch.S",
             },
         },
-        .@"qemu-pc-x86_64", .@"esp32-c6" => unreachable,
+        // creek routes through riscv64.buildSbi, never generic.build.
+        .@"qemu-pc-x86_64", .@"esp32-c6", .creek => unreachable,
     };
 }
 

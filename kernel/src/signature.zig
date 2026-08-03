@@ -60,6 +60,22 @@ const MAX_KEYS: usize = kernel_options.sig_max_keys;
 var keys_buf: [MAX_KEYS]TrustEntry = undefined;
 var keys_count: usize = 0;
 
+/// Optional hardware backend for Ed25519 verification. When installed, the
+/// enforcing-mode verify calls it instead of the software `std.crypto` path.
+/// The in-order targets Ferrite runs on (e.g. the Albion SEP) verify Ed25519 in
+/// software far too slowly (the Curve25519 double-scalar multiply is hundreds of
+/// millions of cycles), so a platform with a verify accelerator installs one
+/// here. It receives the on-wire encodings -- 32-byte public key, 64-byte
+/// signature (`R || S`), and the 32-byte message digest that was signed -- and
+/// returns true iff the signature verifies. Generic: nothing platform-specific
+/// lives in the kernel, only this hook.
+pub const Ed25519Backend = *const fn (
+    pubkey: *const [32]u8,
+    sig: *const [64]u8,
+    digest: *const [32]u8,
+) bool;
+pub var ed25519_backend: ?Ed25519Backend = null;
+
 pub fn keyCount() usize {
     return keys_count;
 }
@@ -200,6 +216,12 @@ fn verifyOne(key: *const TrustEntry, algo: Algo, digest: *const [32]u8, sig_payl
         .ed25519 => {
             if (sig_payload.len != std.crypto.sign.Ed25519.Signature.encoded_length) return error.BadSignature;
             if (key.pubkey_len != std.crypto.sign.Ed25519.PublicKey.encoded_length) return error.BadSignature;
+            // Hardware offload: if a verify accelerator is installed, use it
+            // (the software path below is impractically slow on the in-order SEP).
+            if (ed25519_backend) |hw| {
+                if (hw(key.pubkey[0..32], sig_payload[0..64], digest)) return;
+                return error.BadSignature;
+            }
             const sig = std.crypto.sign.Ed25519.Signature.fromBytes(sig_payload[0..std.crypto.sign.Ed25519.Signature.encoded_length].*);
             const pk = std.crypto.sign.Ed25519.PublicKey.fromBytes(
                 key.pubkey[0..std.crypto.sign.Ed25519.PublicKey.encoded_length].*,

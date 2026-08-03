@@ -13,7 +13,7 @@ fn uspaceTarget(board: common.Board) std.Target.Query {
             // neon+sha2 required: std sha2 SIMD path traps under ubsan without them.
             .cpu_features_add = std.Target.aarch64.featureSet(&.{ .neon, .crypto, .sha2 }),
         },
-        .@"qemu-virt-riscv64" => .{
+        .@"qemu-virt-riscv64", .creek => .{
             .cpu_arch = .riscv64,
             .os_tag = .freestanding,
             .abi = .none,
